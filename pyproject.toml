@@ -1,0 +1,23 @@
+[project]
+name = "word-mcp"
+version = "0.1.0"
+description = "MCP server for Microsoft Word document automation"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "mcp>=1.26.0",
+    "python-docx>=1.1.0",
+    "pywin32>=311",
+    "structlog>=24.0.0",
+    "psutil>=6.0.0",
+]
+
+[project.scripts]
+word-mcp = "word_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
