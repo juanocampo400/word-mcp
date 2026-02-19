@@ -694,9 +694,9 @@ def replace_text_tool(
     """
     Find and replace text across the document.
 
-    FORMATTING RESET WARNING: Replacements occur at the paragraph level.
-    Formatting within replaced paragraphs (bold, italic, etc.) will be reset
-    to default. This is acceptable for Phase 1 which has no formatting requirements.
+    FORMATTING PRESERVATION: Replacements occur at the run level. The first run's
+    formatting (bold, italic, font size, color, underline) is preserved on the
+    replaced text. If a paragraph has no runs, text is assigned directly.
 
     REPLACE MODES:
     - replace_all=True (default): Replaces ALL occurrences throughout document
@@ -730,8 +730,8 @@ def replace_text_tool(
         "No occurrences of 'missing' found."
 
     Design notes:
-        - Paragraph-level replacement: Entire paragraph text replaced
-        - Formatting loss: In-paragraph formatting (bold, etc.) is reset
+        - Run-level replacement: Text replaced within runs, preserving first run's formatting
+        - Formatting preserved: In-paragraph formatting (bold, italic, font) of first run retained
         - Paragraph style preserved: Style like "Heading 1" stays unchanged
         - Case-insensitive uses regex: Preserves non-matched casing in text
     """

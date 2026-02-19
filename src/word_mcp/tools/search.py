@@ -128,8 +128,9 @@ def replace_text(
 ) -> str:
     """Find and replace text across the document.
 
-    Limitation: Replaces at paragraph level. Formatting within replaced paragraphs
-    will be reset to default (acceptable for Phase 1).
+    Preserves the formatting of the first run in each modified paragraph (bold,
+    italic, font size, color, underline, font name). If a paragraph has no runs,
+    falls back to direct text assignment. Consistent with edit_paragraph behavior.
 
     Args:
         path: Document path or key
@@ -158,7 +159,12 @@ def replace_text(
         if stopped:
             break
 
-        text = para.text
+        # Build full paragraph text from runs for matching
+        runs = list(para.runs)
+        if runs:
+            text = "".join(r.text for r in runs)
+        else:
+            text = para.text
 
         # Check if find_text exists
         if case_sensitive:
@@ -167,7 +173,7 @@ def replace_text(
             has_match = find_text.lower() in text.lower()
 
         if has_match:
-            # Perform replacement
+            # Perform replacement on full text string
             if case_sensitive:
                 if replace_all:
                     new_text = text.replace(find_text, replace_with)
@@ -184,8 +190,17 @@ def replace_text(
                     new_text = re.sub(re.escape(find_text), replace_with, text, count=1, flags=re.IGNORECASE)
                     count = 1
 
-            # Apply replacement (loses formatting)
-            para.text = new_text
+            # Apply replacement at run level to preserve formatting
+            if not runs:
+                # No runs: fall back to direct assignment
+                para.text = new_text
+            else:
+                # Set first run's text to full new text; clear remaining runs
+                # This preserves the first run's font properties on the new text
+                runs[0].text = new_text
+                for run in runs[1:]:
+                    run.text = ""
+
             total_replacements += count
             paragraphs_modified += 1
 
