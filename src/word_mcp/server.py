@@ -69,6 +69,7 @@ from .tools.tables import (
 from .tools.tables_com import (
     delete_table_row,
     delete_table_column,
+    tracked_edit_table_cell,
 )
 from .tools.images import (
     insert_image,
@@ -938,7 +939,8 @@ def get_tracked_changes_tool(path: str) -> str:
 
 @mcp.tool()
 def tracked_add_paragraph_tool(
-    path: str, text: str, position: str = "end", author: str = "Claude"
+    path: str, text: str, position: str = "end", author: str = "Claude",
+    expected_text: str = None
 ) -> str:
     """
     Add a paragraph that appears as an Insertion revision in Word.
@@ -949,11 +951,21 @@ def tracked_add_paragraph_tool(
     create a paragraph that Word records as a tracked change. The user will see
     it as an insertion (colored/underlined) in Word and can accept or reject it.
 
+    INDEX TRANSLATION: Internally translates python-docx body paragraph indexes to
+    COM paragraph indexes, so documents with tables are handled correctly. The index
+    you pass should match what read_document_tool reports.
+
     Args:
         path: Path or key of open document
         text: Paragraph text content
         position: "end" to append, or zero-based index string to insert before
         author: Author name for this tracked change (default: "Claude")
+        expected_text: Optional content verification string. If provided and position
+                       is not "end", the paragraph at that position must contain this
+                       text (case-sensitive partial match) before inserting. If it does
+                       not match, insert is refused with an error message including the
+                       index, expected text, and actual text preview. Ignored for "end"
+                       position (nothing to verify at end of document).
 
     Returns:
         Success message or error message prefixed with "Error:"
@@ -967,6 +979,14 @@ def tracked_add_paragraph_tool(
         >>> tracked_add_paragraph_tool("C:/Documents/report.docx", "New intro", "0")
         "Added tracked paragraph at 0: 'New intro'. Revision will appear as insertion by 'Claude'."
 
+        Insert with content verification:
+        >>> tracked_add_paragraph_tool("C:/Documents/report.docx", "New section", "5", expected_text="Background")
+        "Added tracked paragraph at 5: 'New section'. Revision will appear as insertion by 'Claude'."
+
+        Error - content mismatch (indexes have shifted):
+        >>> tracked_add_paragraph_tool("C:/Documents/report.docx", "New section", "5", expected_text="Background")
+        "Error: Content verification failed for paragraph 5. Expected text containing 'Background' but found: 'Introduction to the project...'. The paragraph may have shifted -- re-read the document."
+
         Error - tracking not enabled:
         >>> tracked_add_paragraph_tool("C:/Documents/report.docx", "Text")
         "Error: Tracked changes are not enabled. Call enable_tracked_changes first."
@@ -976,13 +996,15 @@ def tracked_add_paragraph_tool(
         - Requires tracking enabled: Returns error if TrackRevisions=False
         - Bridge pattern: Uses COM to add text, creates Insertion revision
         - Author attribution: Sets UserName in Word before adding
+        - Index translation: COM paragraph indexes adjusted to skip table cell paragraphs
     """
-    return tracked_add_paragraph(path, text, position, author)
+    return tracked_add_paragraph(path, text, position, author, expected_text)
 
 
 @mcp.tool()
 def tracked_edit_paragraph_tool(
-    path: str, index: int, new_text: str, author: str = "Claude"
+    path: str, index: int, new_text: str, author: str = "Claude",
+    expected_text: str = None
 ) -> str:
     """
     Replace paragraph text creating tracked Deletion + Insertion revisions.
@@ -993,11 +1015,23 @@ def tracked_edit_paragraph_tool(
     replace text so Word records it as tracked changes. The user will see the old
     text as a deletion (strikethrough) and new text as an insertion (colored/underlined).
 
+    INDEX TRANSLATION: Internally translates python-docx body paragraph indexes to
+    COM paragraph indexes, so documents with tables are handled correctly. The index
+    you pass should match what read_document_tool reports. This fixes the bug where
+    edits after a table would land on a table cell paragraph instead of the intended
+    body paragraph.
+
     Args:
         path: Path or key of open document
-        index: Zero-based paragraph index to edit
+        index: Zero-based paragraph index to edit (use the index from read_document_tool)
         new_text: New text content to replace existing text
         author: Author name for these tracked changes (default: "Claude")
+        expected_text: Optional content verification string. If provided, the target
+                       paragraph must contain this text (case-sensitive partial match)
+                       before the edit proceeds. If it does not match, the edit is
+                       refused with an error message including the index, expected text,
+                       and actual text preview (first ~80 chars). Use this to prevent
+                       silent data corruption when paragraph indexes may have shifted.
 
     Returns:
         Success message or error message prefixed with "Error:"
@@ -1007,22 +1041,32 @@ def tracked_edit_paragraph_tool(
         >>> tracked_edit_paragraph_tool("C:/Documents/report.docx", 0, "Updated text")
         "Edited tracked paragraph 0. Was: 'Original text' -> Now: 'Updated text'. Changes tracked as revisions by 'Claude'."
 
+        Edit with content verification (safe editing):
+        >>> tracked_edit_paragraph_tool("C:/Documents/report.docx", 40, "New section 4 text", expected_text="Section 4")
+        "Edited tracked paragraph 40. Was: 'Section 4 of Task Order...' -> Now: 'New section 4 text'. Changes tracked as revisions by 'Claude'."
+
+        Error - content mismatch (table cell was targeted instead of body paragraph):
+        >>> tracked_edit_paragraph_tool("C:/Documents/report.docx", 40, "New text", expected_text="Section 4")
+        "Error: Content verification failed for paragraph 40. Expected text containing 'Section 4' but found: 'DELIVERABLE'. The paragraph may have shifted -- re-read the document."
+
         Error - tracking not enabled:
         >>> tracked_edit_paragraph_tool("C:/Documents/report.docx", 0, "Text")
         "Error: Tracked changes are not enabled. Call enable_tracked_changes first."
 
     Design notes:
-        - Zero-based indexing: Same as edit_paragraph for consistency
+        - Zero-based indexing: Same as edit_paragraph and read_document for consistency
         - Requires tracking enabled: Returns error if TrackRevisions=False
         - Bridge pattern: Uses COM Range.Text replacement, creates Deletion + Insertion
         - Author attribution: Sets UserName in Word before editing
+        - Index translation: COM paragraph indexes adjusted to skip table cell paragraphs
+        - expected_text guard: Recommended for all edits in documents with tables
     """
-    return tracked_edit_paragraph(path, index, new_text, author)
+    return tracked_edit_paragraph(path, index, new_text, author, expected_text)
 
 
 @mcp.tool()
 def tracked_delete_paragraph_tool(
-    path: str, index: int, author: str = "Claude"
+    path: str, index: int, author: str = "Claude", expected_text: str = None
 ) -> str:
     """
     Delete a paragraph creating a tracked Deletion revision (strikethrough in Word).
@@ -1033,13 +1077,23 @@ def tracked_delete_paragraph_tool(
     delete so Word records it as a tracked change. The user will see the deleted
     text as a strikethrough and can accept or reject the deletion.
 
+    INDEX TRANSLATION: Internally translates python-docx body paragraph indexes to
+    COM paragraph indexes, so documents with tables are handled correctly. The index
+    you pass should match what read_document_tool reports.
+
     INDEX SHIFT WARNING: After deletion, remaining paragraphs shift down. Same
     warning as delete_paragraph - re-read document before additional operations.
 
     Args:
         path: Path or key of open document
-        index: Zero-based paragraph index to delete
+        index: Zero-based paragraph index to delete (use the index from read_document_tool)
         author: Author name for this tracked change (default: "Claude")
+        expected_text: Optional content verification string. If provided, the target
+                       paragraph must contain this text (case-sensitive partial match)
+                       before the delete proceeds. If it does not match, the delete is
+                       refused with an error message including the index, expected text,
+                       and actual text preview (first ~80 chars). Use this to prevent
+                       accidentally deleting the wrong paragraph when indexes may have shifted.
 
     Returns:
         Success message or error message prefixed with "Error:"
@@ -1049,18 +1103,91 @@ def tracked_delete_paragraph_tool(
         >>> tracked_delete_paragraph_tool("C:/Documents/report.docx", 2)
         "Deleted tracked paragraph 2 ('Old text'). Deletion tracked as revision by 'Claude'. Remaining paragraphs have shifted -- re-read document to get updated indexes."
 
+        Delete with content verification (safe deletion):
+        >>> tracked_delete_paragraph_tool("C:/Documents/report.docx", 5, expected_text="Obsolete section header")
+        "Deleted tracked paragraph 5 ('Obsolete section header'). Deletion tracked as revision by 'Claude'. Remaining paragraphs have shifted -- re-read document to get updated indexes."
+
+        Error - content mismatch (wrong paragraph would be deleted):
+        >>> tracked_delete_paragraph_tool("C:/Documents/report.docx", 5, expected_text="Obsolete section header")
+        "Error: Content verification failed for paragraph 5. Expected text containing 'Obsolete section header' but found: 'Introduction text here'. The paragraph may have shifted -- re-read the document."
+
         Error - tracking not enabled:
         >>> tracked_delete_paragraph_tool("C:/Documents/report.docx", 2)
         "Error: Tracked changes are not enabled. Call enable_tracked_changes first."
 
     Design notes:
-        - Zero-based indexing: Same as delete_paragraph for consistency
+        - Zero-based indexing: Same as delete_paragraph and read_document for consistency
         - Requires tracking enabled: Returns error if TrackRevisions=False
         - Bridge pattern: Uses COM Range.Delete(), creates Deletion revision
         - Index shift warning: Same behavior as Phase 1's delete_paragraph
         - Author attribution: Sets UserName in Word before deleting
+        - Index translation: COM paragraph indexes adjusted to skip table cell paragraphs
+        - expected_text guard: Recommended for all deletions in documents with tables
     """
-    return tracked_delete_paragraph(path, index, author)
+    return tracked_delete_paragraph(path, index, author, expected_text)
+
+
+@mcp.tool()
+def tracked_edit_table_cell_tool(
+    path: str, table_index: int, row_index: int, col_index: int,
+    new_text: str, author: str = "Claude"
+) -> str:
+    """
+    Edit a table cell creating tracked Deletion + Insertion revisions in Word.
+
+    REQUIRES: Tracked changes must be enabled first (call enable_tracked_changes).
+
+    This fills the gap between edit_table_cell_tool (untracked) and the tracked
+    paragraph tools. It uses COM automation so Word records the cell edit as a
+    tracked change -- the old text appears as a deletion (strikethrough) and the
+    new text as an insertion (colored/underlined). The user can accept or reject
+    the change in Word.
+
+    REQUIRES COM AUTOMATION: Document must be saved to disk first (use save_document
+    or save_document_as before calling this tool).
+
+    Args:
+        path: Path or key of open document
+        table_index: Zero-based table index in the document
+        row_index: Zero-based row index within the table
+        col_index: Zero-based column index within the table
+        new_text: New text content to replace existing cell text
+        author: Author name for the tracked changes (default: "Claude")
+
+    Returns:
+        Success message with before/after preview, or error message prefixed with "Error:"
+
+    Examples:
+        Edit table cell with tracking:
+        >>> tracked_edit_table_cell_tool("C:/Documents/report.docx", 0, 1, 0, "Alice")
+        "Edited tracked table 0, cell (1, 0). Was: 'John' -> Now: 'Alice'. Changes tracked as revisions by 'Claude'."
+
+        Edit with different author:
+        >>> tracked_edit_table_cell_tool("C:/Documents/report.docx", 0, 0, 2, "March 31, 2027", "Juan Ocampo")
+        "Edited tracked table 0, cell (0, 2). Was: 'February 23, 2026' -> Now: 'March 31, 2027'. Changes tracked as revisions by 'Juan Ocampo'."
+
+        Error - tracking not enabled:
+        >>> tracked_edit_table_cell_tool("C:/Documents/report.docx", 0, 0, 0, "text")
+        "Error: Tracked changes are not enabled on this document. Call enable_tracked_changes first."
+
+        Error - document not saved:
+        >>> tracked_edit_table_cell_tool("Untitled-1", 0, 0, 0, "text")
+        "Error: Document must be saved to disk before tracked editing. Use save_document_as first."
+
+        Error - invalid table index:
+        >>> tracked_edit_table_cell_tool("C:/Documents/report.docx", 5, 0, 0, "text")
+        "Error: Invalid table index 5. Document has 2 table(s) (valid range: 0-1)."
+
+    Design notes:
+        - Requires COM automation: Document must be saved to disk
+        - Requires tracked changes enabled: Returns error if TrackRevisions=False
+        - Bridge pattern: Uses COM for tracked cell edit, then reloads python-docx
+        - Zero-based indexing: All table/row/col indexes are 0-based
+        - Cell end marker: COM cell ranges end with \\r\\x07; range is trimmed before text replacement
+        - Author attribution: Sets UserName in Word before editing
+        - Completes tracked workflow: Use alongside tracked_edit_paragraph_tool for documents with tables
+    """
+    return tracked_edit_table_cell(path, table_index, row_index, col_index, new_text, author)
 
 
 # Register formatting tools (Phase 3)
