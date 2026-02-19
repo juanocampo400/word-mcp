@@ -96,26 +96,36 @@ def resize_image(
     path: str,
     image_index: int,
     width: float = None,
-    height: float = None
+    height: float = None,
+    preserve_aspect_ratio: bool = True
 ) -> str:
     """Resize an existing inline image by its index.
 
-    NOTE: When resizing an existing image, python-docx does NOT automatically preserve
-    aspect ratio. If you set only width, the height remains unchanged (and vice versa).
-    To preserve aspect ratio, you must calculate and set both dimensions.
+    By default, preserves the image's aspect ratio when only one dimension is given:
+    - If only width provided: height is computed from the original aspect ratio.
+    - If only height provided: width is computed from the original aspect ratio.
+    - If both provided: both dimensions are applied as-is (user explicitly chose both).
+
+    Set preserve_aspect_ratio=False to replicate the old behavior where only the
+    supplied dimension changes and the other remains unchanged.
 
     Args:
         path: Document path or key
         image_index: 0-based index into doc.inline_shapes collection
         width: Optional width in inches
         height: Optional height in inches
+        preserve_aspect_ratio: If True (default), auto-computes the missing dimension
+                               to keep the original aspect ratio. If False, only the
+                               provided dimension(s) are changed.
 
     Returns:
         Success message with new dimensions, or error message
 
     Examples:
-        resize_image(key, 0, width=5.0)  # Set width to 5 inches (height unchanged)
+        resize_image(key, 0, width=5.0)  # Width=5in, height auto-computed (aspect preserved)
+        resize_image(key, 0, height=3.0)  # Height=3in, width auto-computed (aspect preserved)
         resize_image(key, 1, width=3.0, height=2.0)  # Set both dimensions
+        resize_image(key, 2, width=5.0, preserve_aspect_ratio=False)  # Width only, height unchanged
     """
     try:
         doc = document_manager.get_document(path)
@@ -137,6 +147,25 @@ def resize_image(
     # Get the inline shape
     shape = doc.inline_shapes[image_index]
 
+    # Compute missing dimension when preserve_aspect_ratio is True
+    aspect_preserved = False
+    if preserve_aspect_ratio and not (width is not None and height is not None):
+        orig_width_emu = shape.width
+        orig_height_emu = shape.height
+        if orig_width_emu and orig_height_emu:
+            orig_width_in = orig_width_emu.inches
+            orig_height_in = orig_height_emu.inches
+            if width is not None and height is None:
+                # Compute height from aspect ratio
+                ratio = orig_height_in / orig_width_in
+                height = width * ratio
+                aspect_preserved = True
+            elif height is not None and width is None:
+                # Compute width from aspect ratio
+                ratio = orig_width_in / orig_height_in
+                width = height * ratio
+                aspect_preserved = True
+
     # Apply new dimensions
     if width is not None:
         shape.width = Inches(width)
@@ -147,6 +176,8 @@ def resize_image(
     current_width = shape.width.inches
     current_height = shape.height.inches
 
+    if aspect_preserved:
+        return f"Resized image {image_index} to width={current_width:.2f}in, height={current_height:.2f}in (aspect ratio preserved)."
     return f"Resized image {image_index} to width={current_width:.2f}in, height={current_height:.2f}in."
 
 

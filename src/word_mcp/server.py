@@ -632,25 +632,26 @@ def delete_paragraph_tool(path: str, index: int) -> str:
 
 # Register search tools
 @mcp.tool()
-def search_text_tool(path: str, query: str, case_sensitive: bool = False) -> str:
+def search_text_tool(path: str, query: str, case_sensitive: bool = False, use_regex: bool = False) -> str:
     """
     Search for text in document paragraphs.
 
-    PLAIN TEXT ONLY: v1 supports plain text search only (no regex). This is a
-    locked design decision for Phase 1 simplicity.
+    Supports plain text search (default) and regex search via use_regex=True.
 
     Returns all paragraphs containing the query text, with match counts and context.
 
     Args:
         path: Document path or key
-        query: Text string to search for (plain text, not regex)
+        query: Text string to search for. When use_regex=True, this is a regex pattern.
         case_sensitive: If False, performs case-insensitive search (default: False)
+        use_regex: If True, treats query as a regular expression pattern (default: False).
+                   Returns a clear error if the pattern is invalid.
 
     Returns:
         Formatted search results showing paragraph indexes, match counts, and context
 
     Examples:
-        Case-insensitive search (default):
+        Case-insensitive plain text search (default):
         >>> search_text_tool("report.docx", "paragraph")
         '''Found 2 match(es) in 2 paragraph(s):
         [1] 1 match(es): "This is the first paragraph of content."
@@ -661,17 +662,25 @@ def search_text_tool(path: str, query: str, case_sensitive: bool = False) -> str
         >>> search_text_tool("report.docx", "Paragraph", case_sensitive=True)
         "No matches found for 'Paragraph'"
 
-        No matches:
-        >>> search_text_tool("report.docx", "missing")
-        "No matches found for 'missing'"
+        Regex search -- whole-word match:
+        >>> search_text_tool("report.docx", r"\\bparagraph\\b", use_regex=True)
+        "Found 2 match(es) in 2 paragraph(s): ..."
+
+        Regex search -- ISO date pattern:
+        >>> search_text_tool("report.docx", r"\\d{4}-\\d{2}-\\d{2}", use_regex=True)
+        "Found 3 match(es) in 3 paragraph(s): ..."
+
+        Invalid regex pattern:
+        >>> search_text_tool("report.docx", r"[unclosed", use_regex=True)
+        "Error: Invalid regex pattern: unterminated character set at position 0"
 
     Design notes:
         - Context window: Shows 50 chars before/after match, or full paragraph if short
         - Multiple matches per paragraph: Shows total count per paragraph
         - Zero-based indexing: Paragraph indexes shown for easy editing
-        - Plain text only: No regex metacharacters
+        - Regex error handling: Invalid patterns return a clear error message
     """
-    return search_text(path, query, case_sensitive)
+    return search_text(path, query, case_sensitive, use_regex)
 
 
 @mcp.tool()
@@ -1683,38 +1692,52 @@ def resize_image_tool(
     path: str,
     image_index: int,
     width: float = None,
-    height: float = None
+    height: float = None,
+    preserve_aspect_ratio: bool = True
 ) -> str:
     """
     Resize an existing inline image.
 
-    WARNING: python-docx does NOT auto-preserve aspect ratio when resizing existing
-    images (unlike insert which does). If you want to preserve aspect ratio, calculate
-    and provide both dimensions.
+    By default, aspect ratio is preserved when only one dimension is specified.
+    Pass preserve_aspect_ratio=False to change only the supplied dimension and
+    leave the other unchanged (the old behavior).
 
     Args:
         path: Document path or key
         image_index: Zero-based index into inline images collection
         width: Optional new width in inches
         height: Optional new height in inches
+        preserve_aspect_ratio: If True (default), auto-computes the missing dimension
+                               to keep the original aspect ratio. If False, only the
+                               provided dimension(s) are applied.
 
     Returns:
         Success message with new dimensions, or error message
 
     Examples:
-        >>> resize_image_tool("report.docx", 0, width=3.0, height=2.0)
-        "Resized image 0 to width=3.0in, height=2.0in."
-
+        Width only -- height auto-computed to preserve aspect ratio (default):
         >>> resize_image_tool("report.docx", 0, width=4.0)
-        "Resized image 0 to width=4.0in (height unchanged)."
+        "Resized image 0 to width=4.00in, height=2.67in (aspect ratio preserved)."
+
+        Height only -- width auto-computed:
+        >>> resize_image_tool("report.docx", 0, height=3.0)
+        "Resized image 0 to width=4.50in, height=3.00in (aspect ratio preserved)."
+
+        Both dimensions -- applied as-is:
+        >>> resize_image_tool("report.docx", 0, width=3.0, height=2.0)
+        "Resized image 0 to width=3.00in, height=2.00in."
+
+        Width only, no aspect ratio preservation:
+        >>> resize_image_tool("report.docx", 0, width=5.0, preserve_aspect_ratio=False)
+        "Resized image 0 to width=5.00in, height=2.00in."
 
     Design notes:
         - Zero-based indexing: Image index is 0-based
-        - No auto aspect ratio: Must calculate manually to preserve aspect ratio
+        - Aspect ratio default: preserve_aspect_ratio=True prevents unintentional distortion
         - Inline images only: Works on InlineShape collection
         - At least one dimension required: Must specify width, height, or both
     """
-    return resize_image(path, image_index, width, height)
+    return resize_image(path, image_index, width, height, preserve_aspect_ratio)
 
 
 @mcp.tool()
