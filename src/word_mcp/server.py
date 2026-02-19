@@ -564,10 +564,10 @@ def edit_paragraph_tool(path: str, index: int, new_text: str) -> str:
     INDEX REFERENCING: Use read_document first to see current paragraph indexes.
     Indexes are zero-based (first paragraph is 0).
 
-    FORMATTING LOSS WARNING: This replaces all text runs and loses any formatting
-    (bold, italic, font changes, etc.) within the paragraph. This is acceptable
-    for Phase 1 which has no formatting requirements. The paragraph style
-    (e.g., "Heading 1") is preserved.
+    FORMATTING PRESERVATION: The replacement text inherits the formatting of the
+    first run in the paragraph (bold, italic, font size, color, underline, font
+    name). If the paragraph has no runs, text is assigned directly. The paragraph
+    style (e.g., "Heading 1") is always preserved.
 
     Args:
         path: Document path or key

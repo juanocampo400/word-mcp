@@ -148,8 +148,9 @@ def add_paragraph(
 def edit_paragraph(path: str, index: int, new_text: str) -> str:
     """Edit (replace) the text of an existing paragraph by index.
 
-    NOTE: This replaces all runs and loses any formatting (bold, italic, etc.).
-    This is acceptable for Phase 1 which has no formatting requirements.
+    Preserves the formatting of the first run (bold, italic, font size, color,
+    underline, font name) on the replacement text. If the paragraph has no runs
+    (empty paragraph), falls back to direct text assignment.
 
     Args:
         path: Document path or key
@@ -176,8 +177,17 @@ def edit_paragraph(path: str, index: int, new_text: str) -> str:
     para = doc.paragraphs[index]
     old_text = para.text
 
-    # Replace text (loses formatting)
-    para.text = new_text
+    # Replace text at run level to preserve formatting
+    runs = list(para.runs)
+    if not runs:
+        # No runs: empty paragraph -- fall back to direct assignment
+        para.text = new_text
+    else:
+        # Set first run's text to full new text; clear remaining runs
+        # This preserves the first run's font properties on the new text
+        runs[0].text = new_text
+        for run in runs[1:]:
+            run.text = ""
 
     # Previews: first 50 chars each
     old_preview = old_text[:50] if len(old_text) <= 50 else old_text[:50] + "..."
